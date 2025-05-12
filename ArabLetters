@@ -1,0 +1,192 @@
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+public class DigitPerceptron {
+
+    
+    static class SimplePerceptron {
+        static final int INPUT_SIZE = 100;   // 10x10 пикселей
+        static final int OUTPUT_SIZE = 10;   // цифры 0-9
+        static final double LEARNING_RATE = 0.1;
+
+        double[][] weights; // [OUTPUT_SIZE][INPUT_SIZE]
+        double[] biases;    // [OUTPUT_SIZE]
+
+        public SimplePerceptron() {
+            weights = new double[OUTPUT_SIZE][INPUT_SIZE];
+            biases = new double[OUTPUT_SIZE];
+            Random rnd = new Random();
+            // Инициализация весов малыми случайными значениями
+            for (int i = 0; i < OUTPUT_SIZE; i++) {
+                for (int j = 0; j < INPUT_SIZE; j++) {
+                    weights[i][j] = rnd.nextGaussian() * 0.01;
+                }
+                biases[i] = 0.0;
+            }
+        }
+
+        // Вычисляем выход с softmax
+        public double[] forward(double[] input) {
+            double[] z = new double[OUTPUT_SIZE];
+            for (int i = 0; i < OUTPUT_SIZE; i++) {
+                double sum = biases[i];
+                for (int j = 0; j < INPUT_SIZE; j++) {
+                    sum += weights[i][j] * input[j];
+                }
+                z[i] = sum;
+            }
+            return softmax(z);
+        }
+
+        private double[] softmax(double[] z) {
+            double max = Double.NEGATIVE_INFINITY;
+            for (double v : z) if (v > max) max = v;
+            double sum = 0.0;
+            double[] result = new double[z.length];
+            for (int i = 0; i < z.length; i++) {
+                result[i] = Math.exp(z[i] - max);
+                sum += result[i];
+            }
+            for (int i = 0; i < z.length; i++) {
+                result[i] /= sum;
+            }
+            return result;
+        }
+
+        // Обучение на одном примере (input, label от 0 до 9)
+        public void train(double[] input, int label) {
+            double[] output = forward(input);
+            for (int i = 0; i < OUTPUT_SIZE; i++) {
+                double target = (i == label) ? 1.0 : 0.0;
+                double error = output[i] - target;
+                for (int j = 0; j < INPUT_SIZE; j++) {
+                    weights[i][j] -= LEARNING_RATE * error * input[j];
+                }
+                biases[i] -= LEARNING_RATE * error;
+            }
+        }
+
+        // Предсказание класса для входа
+        public int predict(double[] input) {
+            double[] output = forward(input);
+            int maxIdx = 0;
+            double maxVal = output[0];
+            for (int i = 1; i < output.length; i++) {
+                if (output[i] > maxVal) {
+                    maxVal = output[i];
+                    maxIdx = i;
+                }
+            }
+            return maxIdx;
+        }
+    }
+
+    // Класс для загрузки и преобразования изображения в вектор признаков 10x10
+    static class ImageLoader {
+
+        public static double[] loadImageAsInputVector(String filePath) throws IOException {
+            BufferedImage original = ImageIO.read(new File(filePath));
+            BufferedImage resized = new BufferedImage(10, 10, BufferedImage.TYPE_BYTE_GRAY);
+            resized.getGraphics().drawImage(original, 0, 0, 10, 10, null);
+
+            double[] inputVector = new double[100];
+            for (int y = 0; y < 10; y++) {
+                for (int x = 0; x < 10; x++) {
+                    int rgb = resized.getRGB(x, y);
+                    int gray = rgb & 0xFF;
+                    inputVector[y * 10 + x] = gray / 255.0; // От 0.0 до 1.0
+                }
+            }
+            return inputVector;
+        }
+    }
+
+    // Структура для хранения пары "вход-метка"
+    static class LabeledSample {
+        double[] input;
+        int label;
+
+        LabeledSample(double[] input, int label) {
+            this.input = input;
+            this.label = label;
+        }
+    }
+
+    public static void main(String[] args) {
+
+        // Создаем перцептрон
+        SimplePerceptron perceptron = new SimplePerceptron();
+
+        // Загрузим тренировочные данные в формате:
+        // У вас должна быть структура папок, например:
+        // ./data/0/img0.png, ./data/0/img1.png, ..., ./data/9/img0.png и т.д.
+
+        List<LabeledSample> trainingData = new ArrayList<>();
+
+        // Здесь простая загрузка изображений из папок 0..9
+        for (int digit = 0; digit <= 9; digit++) {
+            String folderPath = "./data/" + digit;
+            File folder = new File(folderPath);
+            if (!folder.exists() || !folder.isDirectory()) {
+                System.out.println("Папка не найдена: " + folderPath);
+                continue;
+            }
+            File[] files = folder.listFiles();
+            if (files == null) continue;
+
+            for (File file : files) {
+                if (!file.getName().toLowerCase().endsWith(".png") &&
+                    !file.getName().toLowerCase().endsWith(".jpg") &&
+                    !file.getName().toLowerCase().endsWith(".jpeg")) continue;
+                try {
+                    double[] inputVec = ImageLoader.loadImageAsInputVector(file.getAbsolutePath());
+                    trainingData.add(new LabeledSample(inputVec, digit));
+                } catch (IOException e) {
+                    System.err.println("Ошибка загрузки файла: " + file.getAbsolutePath());
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        System.out.println("Всего загружено обучающих образцов: " + trainingData.size());
+
+        // Обучение по эпохам
+        int epochs = 30; // Кол-во проходов по данным
+        Random rnd = new Random();
+
+        for (int epoch = 1; epoch <= epochs; epoch++) {
+            // Перемешиваем выборку для обучение
+            java.util.Collections.shuffle(trainingData, rnd);
+
+            int correctCount = 0;
+
+            for (LabeledSample sample : trainingData) {
+                int predictionBefore = perceptron.predict(sample.input);
+                if (predictionBefore == sample.label) {
+                    correctCount++;
+                }
+                perceptron.train(sample.input, sample.label);
+            }
+
+            double accuracy = (double) correctCount / trainingData.size() * 100.0;
+            System.out.printf("Эпоха %d: Точность на тренировочных данных (до обновления) = %.2f%%\n", epoch, accuracy);
+        }
+
+        // После обучения можно проверить на тестовом примере
+        try {
+            String testFilePath = "./data/test_digit3.png"; // Путь к тестовому изображению (10x10)
+
+            double[] testInput = ImageLoader.loadImageAsInputVector(testFilePath);
+            int predictedClass = perceptron.predict(testInput);
+            System.out.println("Предсказанный класс для тестового изображения: " + predictedClass);
+        } catch (IOException e) {
+            System.err.println("Ошибка загрузки тестового изображения");
+            e.printStackTrace();
+        }
+    }
+}
